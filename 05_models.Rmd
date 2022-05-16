@@ -1,6 +1,6 @@
 ---
 title: "05_models"
-author: "Lauren Howard"
+author: "Lauren Howard and Kara McCormack"
 date: "4/4/2022"
 output: html_document
 ---
