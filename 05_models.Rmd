@@ -155,13 +155,13 @@ com_covar.bar <- one_dayp1 %>%
   ylab("Mean Proportion")
 com_covar.bar
 
-# hello
 ```
 
 ```{r}
 bar.lcm.covar <- ggarrange(ses_covar.bar, com_covar.bar, 
           labels = c("A", "B"),
           ncol = 2, nrow = 1)
+bar.lcm.covar
 ggsave(filename = "figures/S2bar_lcm.png",
        plot = bar.lcm.covar,
        width = 8, height = 3, units = "in")
