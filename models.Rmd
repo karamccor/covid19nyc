@@ -37,10 +37,10 @@ Output:
 # Read in data
 ```{r readdata}
 # set directory
-dir <- here('output')
+# dir <- here('output')
 
 # load modeling data created in 03_data_merge.Rmd:
-load('output/data.RData')
+load('input/data.RData')
 
 # read in adjacency file
 # to do: create this in data mgmt
@@ -154,7 +154,6 @@ com_covar.bar <- one_dayp1 %>%
   xlab("Covariates to Comorbidity LCM") +
   ylab("Mean Proportion")
 com_covar.bar
-
 ```
 
 ```{r}

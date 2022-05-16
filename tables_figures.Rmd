@@ -1,0 +1,107 @@
+---
+title: "tables_figuress"
+output: html_document
+---
+
+
+## Main Results
+
+### Table 2: INLA Model Results
+## Publication table
+```{r printresults}
+# load inla results
+load("results/final.models.Rdata")
+
+# output table for paper
+pub_table <- p1_cases_weekly %>%
+  full_join(p2_cases_weekly, by="var") %>%
+  full_join(p2_deaths_weekly, by="var") %>%
+  mutate_at(vars(starts_with("expmean")), as.character) %>%
+  add_row("var"="Socioeconomic stress class", 
+          "expmean.x"="",
+          "CrI.x"="",
+          "expmean.y"="",
+          "CrI.y"="",
+          "expmean" ="",
+          "CrI"="") %>%
+  add_row("var"="   Low Disadv., High Adv.", 
+          "expmean.x"="Ref",
+          "CrI.x"="-",
+          "expmean.y"="Ref.",
+          "CrI.y"="-",
+          "expmean" ="Ref.",
+          "CrI"="-") %>%
+  add_row("var"="Comorbidity class", 
+          "expmean.x"="",
+          "CrI.x"="",
+          "expmean.y"="",
+          "CrI.y"="",
+          "expmean" ="",
+          "CrI"="") %>%
+  add_row("var"="   Low comorbidity", 
+          "expmean.x"="Ref",
+          "CrI.x"="-",
+          "expmean.y"="Ref.",
+          "CrI.y"="-",
+          "expmean" ="Ref.",
+          "CrI"="-") %>%
+  add_row("var"="Interaction terms", 
+          "expmean.x"="",
+          "CrI.x"="",
+          "expmean.y"="",
+          "CrI.y"="",
+          "expmean" ="",
+          "CrI"="") %>%
+  mutate(var = case_when(
+    var=="Low Disadv., Low Adv." ~ "   Low Disadv., Low Adv.",
+    var=="High Disadv., High Adv." ~ "   High Disadv., High Adv.",
+    var=="High Disadv., Low Adv." ~ "   High Disadv., Low Adv.",
+    var=="Medium comorbidity" ~ "   Medium comorbidity",
+    var=="High comorbidity" ~ "   High comorbidity",
+    var=="Time:Low Disadv., Low Adv." ~ "   Time:Low Disadv., Low Adv.",
+    var=="Time:High Disadv., High Adv." ~ "   Time:High Disadv., High Adv.",
+    var=="Time:High Disadv., Low Adv." ~ "   Time:High Disadv., Low Adv.",
+    var=="Time:Medium comorbidity" ~ "   Time:Medium comorbidity",
+    var=="Time:High comorbidity" ~ "   Time:High comorbidity",
+    TRUE ~ var))
+
+# scratch below
+pub_table
+```
+
+```{r}
+# reorder variables
+rownames(pub_table) = c(3:5, 8:9, 16:20, 11:15, 1, 2, 6, 7, 10)
+pub_table <- pub_table[ order(as.numeric(row.names(pub_table))), ]
+rownames(pub_table) = NULL
+
+# print table
+pub_table %>% 
+  kable(col.names = c('Variable', 'Rate Ratio', "95% CrI", 
+                      'Rate Ratio', "95% CrI", 
+                      'Rate Ratio', "95% CrI"),
+        booktabs=T,
+        align = "lcccccc") %>%
+  column_spec(1, bold = T) %>%
+  kable_styling(full_width = F) %>%
+  add_header_above(c("", 
+                     "Period 1 Cases"=2, 
+                     "Period 2 Cases"=2, 
+                     "Period 2 Mortality"=2), align = "c") 
+
+# save table as .tex file
+pub_table %>% 
+  kable(format = 'latex', 
+        col.names = c('Variable', 'Rate Ratio', "95% CrI", 
+                      'Rate Ratio', "95% CrI", 
+                      'Rate Ratio', "95% CrI"),
+        booktabs=T,
+        align = "lcccccc") %>%
+  column_spec(1, bold = T) %>%
+  kable_styling(full_width = F) %>%
+  add_header_above(c("", 
+                     "Period 1 Cases"=2, 
+                     "Period 2 Cases"=2, 
+                     "Period 2 Mortality"=2), align = "c") %>%
+  save_kable("results/INLA_models_final_table.tex",float = FALSE)
+```
