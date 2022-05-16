@@ -1,0 +1,447 @@
+---
+title: "05_models"
+author: "Lauren Howard"
+date: "4/4/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(INLA)
+library(glmmTMB)
+library(tidyverse)
+library(kableExtra)
+library(here)
+library(cowplot)
+library(ggpubr)
+options(scipen = 999)
+```
+
+Goal: 
+  - Run GLMM models and INLA models and compare model fit
+    * A. Cases, Period 1
+    * B. Cases, Period 2
+    * C. Mortality, Period 2
+  - D. Generate Coefficient tables
+
+Input:
+  - weekly.p1.rds (weekly counts for P1 with latent classes and covariates merged in)
+  - weekly.p2.rds (weekly counts for P2 with latent classes and covariates merged in)
+  - nyc_map_modzcta.adj (INLA spatial file)
+
+Output: 
+  - p1_cases_weekly (formatted fixed effects for INLA model for P1 cases)
+  - p2_cases_weekly (formatted fixed effects for INLA model for P2 cases)
+  - p2_deaths_weekly (formatted fixed effects for INLA model for P2 deaths)
+
+# Read in data
+```{r readdata}
+# set directory
+dir <- here('output')
+
+# load modeling data created in 03_data_merge.Rmd:
+load('output/data.RData')
+
+# read in adjacency file
+# to do: create this in data mgmt
+gr <- inla.read.graph(filename = "input/nyc_map_modzcta.adj")
+
+# prepare data sets for analysis 
+for (dataset in c('weekly.p1', 'weekly.p2')) {
+  # read in covid dat
+  w <- eval(parse(text = dataset))
+  
+  # create unique zctas
+  z <- unique(w$modzcta)
+  idarea <- 1:length(z)
+  
+  z_area <- data.frame(modzcta = z, idarea = idarea)
+  
+  # merge everything: now has counters for area and time
+  w2 <- w %>%
+    left_join(z_area, by = "modzcta") 
+    # relabel comorbidity classes 
+    # mutate(com_class = factor(com_class,
+    #                           levels = c("3 (Low)",
+    #                                      "2 (Medium)",
+    #                                      "1 (High)")), 
+    #        ses_class = factor(ses_class, 
+    #                           levels = c("Low Dis., High Adv.", 
+    #                                      "Low Dis., Low Adv.", 
+    #                                      "High Dis., High Adv.", 
+    #                                      "High Dis., Low Adv.")))
+
+  w2 <- w2 %>% rename('idtime' = 'seq.w')
+  w2$idtime_dup <- w2$idtime
+  
+  assign(dataset, w2)
+}
+```
+
+What are the raw proportions of covariates for each latent variable class?
+```{r}
+one_dayp1 <- daily.p1 %>%
+  filter(date == "2020-06-08")
+
+table(one_dayp1$adv_level)
+
+one_dayp1 %>%
+  ggplot(aes(x = age_over_65_prop)) +
+  geom_histogram(bins = 45) +
+  facet_grid(~adv_level)
+
+barplot_dat.adv <- daily.p1 %>%
+  filter(date == "2020-06-08") %>%
+  group_by(adv_level) %>%
+  summarize(mean_ageover65 = mean(age_over_65_prop), 
+            mean_nhb = mean(pop_non_hispanic_black_prop), 
+            mean_hisp = mean(hispanic_prop)) %>%
+  pivot_longer(cols = mean_ageover65:mean_hisp, 
+               names_to = "covariate", 
+               values_to = "value")
+
+barplot_dat.adv %>%
+  ggplot(aes(x = covariate, y = value, fill = adv_level)) +
+  geom_bar(stat = "identity", 
+           position = "dodge")
+
+# logistic model
+logistic.dat <- one_dayp1 %>%
+  mutate(adv_level = ifelse(adv_level == "High", 1, 0))
+model <- glm(adv_level ~ age_over_65_prop + pop_non_hispanic_black_prop + hispanic_prop, 
+             family = binomial(link = 'logit'), 
+             data = logistic.dat)
+summary(model)
+```
+
+```{r}
+# barplots of raw proportions of covariates in each SES grouping
+ses_covar.bar <- one_dayp1 %>%
+  select(modzcta, ses_class, age_over_65_prop, pop_non_hispanic_black_prop, hispanic_prop) %>%
+  group_by(ses_class) %>%
+  summarize(`Age Over 65` = mean(age_over_65_prop), 
+            `Non-Hispanic Black` = mean(pop_non_hispanic_black_prop), 
+            `Hispanic` = mean(hispanic_prop)) %>%
+  pivot_longer(cols = `Age Over 65`:`Hispanic`, 
+               names_to = "covar", 
+               values_to = "value") %>%
+  ggplot(aes(x = covar, y = value)) +
+  geom_bar(stat = "identity", width = .8) +
+  facet_grid(~ses_class) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1),
+        strip.text.x = element_text(size = 6)) +
+  xlab("Covariates to SES LCM") +
+  ylab("Mean Proportion")
+ses_covar.bar
+```
+```{r}
+# raw proportions for COM groupings
+com_covar.bar <- one_dayp1 %>%
+  select(modzcta, com_class, age_over_65_prop, pop_non_hispanic_black_prop, hispanic_prop) %>%
+  group_by(com_class) %>%
+  summarize(`Age Over 65` = mean(age_over_65_prop), 
+            `Non-Hispanic Black` = mean(pop_non_hispanic_black_prop), 
+            `Hispanic` = mean(hispanic_prop)) %>%
+  pivot_longer(cols = `Age Over 65`:`Hispanic`, 
+               names_to = "covar", 
+               values_to = "value") %>%
+  ggplot(aes(x = covar, y = value)) +
+  geom_bar(stat = "identity", width = .8) +
+  facet_grid(~com_class) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1)) +
+  xlab("Covariates to Comorbidity LCM") +
+  ylab("Mean Proportion")
+com_covar.bar
+
+# hello
+```
+
+```{r}
+bar.lcm.covar <- ggarrange(ses_covar.bar, com_covar.bar, 
+          labels = c("A", "B"),
+          ncol = 2, nrow = 1)
+ggsave(filename = "figures/S2bar_lcm.png",
+       plot = bar.lcm.covar,
+       width = 8, height = 3, units = "in")
+```
+
+
+How many cases and deaths at end of each period? 
+```{r}
+daily.p1 %>%
+  filter(date == "2020-06-08") %>%
+  summarize(cases = sum(case_count))
+
+daily.p2 %>%
+  filter(date == "2021-05-10") %>%
+  summarize(cases = sum(case_count))
+
+daily.p2 %>%
+  filter(date == "2021-05-10") %>%
+  summarize(cases = sum(death_count))
+```
+
+How many modzctas in each class? 
+```{r}
+last_day <- daily.p1 %>%
+  filter(date == "2020-06-08")
+table(last_day$ses_class)
+table(last_day$com_class)
+```
+
+
+While the Moran results already inform that a BYM spatial structure is needed (hence the use of INLA), for a further check, let's assess model fit using glmmTMB. 
+
+# glmmTMB models
+```{r glmmtmb_models}
+# Period 1
+# Negative binomial model
+glmmtmb_cases_p1 <- glmmTMB(case_weekly1 ~ 
+                           scale(male_prop) +
+                           idtime + 
+                           com_class*idtime + 
+                           ses_class*idtime +
+                           scale(age_over_65_prop) +
+                           scale(pop_non_hispanic_black_prop) +
+                           scale(hispanic_prop) +
+                           scale(age_over_65_prop) +
+                           com_class +
+                           ses_class +
+                           offset(log(pop_denom)) + 
+                           (idtime|modzcta), 
+                         data = weekly.p1,
+                         family = nbinom2)
+
+# Period 2
+# Negative binomial model
+glmmtmb_cases_p2 <- glmmTMB(case_weekly1 ~ 
+                           scale(male_prop) +
+                           idtime + 
+                           com_class*idtime + 
+                           ses_class*idtime +
+                           scale(age_over_65_prop) +
+                           scale(pop_non_hispanic_black_prop) +
+                           scale(hispanic_prop) +
+                           scale(age_over_65_prop) +
+                           com_class +
+                           ses_class +
+                           offset(log(pop_denom)) + 
+                           (idtime|modzcta), 
+                         data = weekly.p2,
+                         family = nbinom2)
+
+
+# Period 2
+# Zero inflated negative binomial model
+glmmtmb_deaths_p2 <- glmmTMB(death_weekly1 ~ 
+                           scale(male_prop) +
+                           idtime + 
+                           com_class*idtime + 
+                           ses_class*idtime +
+                           scale(age_over_65_prop) +
+                           scale(pop_non_hispanic_black_prop) +
+                           scale(hispanic_prop) +
+                           scale(age_over_65_prop) +
+                           com_class +
+                           ses_class +
+                           offset(log(pop_denom)) + 
+                           (idtime|modzcta), 
+                         data = weekly.p2,
+                         family = nbinom2,  ziformula  = ~ 1)
+```
+
+
+# INLA models
+Incorporates spatial correlation
+```{r inla_models message = F}
+# Weekly INLA negative binomial model formula with default priors and 
+# random slope for time
+inla_cases_formula <- case_weekly1 ~ 
+  scale(male_prop) +
+  idtime + 
+  com_class*idtime + 
+  ses_class*idtime +
+  scale(age_over_65_prop) +
+  scale(pop_non_hispanic_black_prop) +
+  scale(hispanic_prop) +
+  scale(age_over_65_prop) +
+  com_class +
+  ses_class +
+  f(idarea, model = "bym", graph = gr) + # default priors
+  f(idtime_dup, model = "iid") # random slope for time
+
+# Period 1 CASES
+# Negative binomial model with default priors
+inla_cases_p1 <- inla(inla_cases_formula,
+                    family = "nbinomial",
+                    data = weekly.p1,
+                    control.predictor = list(compute = TRUE),
+                    control.compute = list(dic = TRUE),
+                    verbose=TRUE,  offset = log(pop_denom))
+
+# Period 2 CASES
+# Negative binomial model with default priors
+inla_cases_p2 <- inla(inla_cases_formula,
+                    family = "nbinomial",
+                    data = weekly.p2,
+                    control.predictor = list(compute = TRUE),
+                    control.compute = list(dic = TRUE),
+                    verbose=TRUE,  offset = log(pop_denom))
+
+# Weekly INLA zero-inflated negative binomial model with default priors
+# and random slope for time
+weekly_deaths_formula <- death_weekly1 ~ 
+  scale(male_prop) +
+  idtime + 
+  com_class*idtime + 
+  ses_class*idtime +
+  scale(age_over_65_prop) +
+  scale(pop_non_hispanic_black_prop) +
+  scale(hispanic_prop) +
+  scale(age_over_65_prop) +
+  com_class +
+  ses_class +
+  f(idarea, model = "bym", graph = gr) + # default priors
+  f(idtime_dup, model = "iid") # random slope for time
+
+# Period 2 DEATHS
+inla_deaths_p2 <- inla(weekly_deaths_formula,
+                 family = "zeroinflatednbinomial1",
+                 data = weekly.p2,
+                 control.predictor = list(compute = TRUE),
+                 control.compute = list(dic = TRUE),
+                 inla.setOption(mkl=TRUE), 
+                 verbose = T,
+                 offset = log(pop_denom))
+```
+
+# Compare fit of glmmTMB and INLA models
+
+```{r fitplotfun}
+### Function to show fitted vs. observed values for glmmTMB and INLA models
+fitplot <- function(data.in, outvar, glmmtmb_mod, inla_mod, outlab, period, xmax, ymax){
+  # observed cases
+  obs_cases_p1 <- data.in %>% group_by(.[,outvar]) %>% summarize(n_obs = n()) %>% rename('count' = outvar)
+  
+  # extract expected counts from glmmTMB model
+  data.in$fitted_glmmtmb  <- round(predict(object = glmmtmb_mod, type = 'conditional', newdata =data.in))
+  fitted_glmmtmb <- data.in %>% 
+    group_by(fitted_glmmtmb) %>% 
+    summarize(value = n()) %>% 
+    rename('count' = 'fitted_glmmtmb')
+  
+  # extract expected counts from INLA model
+  data.in$fitted_inla <- round(inla_mod$summary.fitted.values$mean)
+  fitted_inla <- data.in %>% 
+    group_by(fitted_inla) %>% 
+    summarize(value = n()) %>% 
+    rename('count' = 'fitted_inla')
+  
+  # glmmTMB plot
+  p1 <- ggplot() +
+    geom_bar(data= obs_cases_p1, aes(x=count, y = sqrt(n_obs)), stat="identity", fill = 'blue3', color = 'blue3') +
+    geom_line(data= fitted_glmmtmb, aes(x=count, y = sqrt(value)), size = 1, position=position_jitter(w=1, h=0)) + 
+    ylab('sqrt(Frequency)') + 
+    xlim(0, xmax) +
+    ylim(0, ymax) +
+    ggtitle(paste0('Fitted vs Observed Plot: \nglmmTMB Model for Weekly ', outlab, 's in ' , period)) + 
+    xlab(paste(outlab, ' Count'))
+  
+  # INLA plot 
+  p2 <- ggplot() +
+    geom_bar(data= obs_cases_p1, aes(x=count, y = sqrt(n_obs)), stat="identity", fill = 'blue3', color = 'blue3') +
+    geom_line(data= fitted_inla, aes(x=count, y = sqrt(value)), size = 1, position=position_jitter(w=1, h=0)) + 
+    ylab('sqrt(Frequency)') + 
+    xlim(0, xmax) +
+    ylim(0, ymax) +
+    ggtitle(paste0('Fitted vs Observed Plot: \nINLA Model for Weekly ', outlab, 's in ' , period)) + 
+    xlab(paste(outlab, ' Count'))
+  
+  plot_grid(p1, p2, align="h", ncol=2) 
+}
+```
+
+## Period 1 Cases
+```{r p1casefit}
+### Period 1 cases
+fitplot(weekly.p1, "case_weekly1", 
+        glmmtmb_cases_p1, 
+        inla_cases_p1, 
+        "Case", "P1", 1000, 5)
+```
+
+
+## Period 2 Cases
+```{r p2casefit}
+### Period 2 cases
+fitplot(weekly.p2, "case_weekly1", 
+        glmmtmb_cases_p2, 
+        inla_cases_p2, 
+        "Case", "P2", 700, 8)
+```
+
+## Period 2 Deaths
+```{r p2deathfit}
+### Period 2 cases
+fitplot(weekly.p2, "death_weekly1", 
+        glmmtmb_deaths_p2, 
+        inla_deaths_p2, 
+        "Death", "P2", 50, 8)
+```
+While P1 cases shows similar results for glmmTMB and INLA, INLA demonstrates improvements in fit for P2 cases and P2 mortality. Based on the fit plots, we will use INLA models.
+
+
+```{r format_models_fun}
+# Function to fix models for display purposes 
+format_model <- function(data.in){
+  data.in %>% 
+    mutate(var = rownames(data.in)) %>%
+    filter(var != '(Intercept)') %>% 
+    mutate(var = case_when(var == 'idtime' ~ 'Time',
+                           var == 'com_classMedium'  ~ 'Medium comorbidity',
+                           var == 'com_classHigh' ~ 'High comorbidity',
+                           var == 'ses_classLow Dis., Low Adv.' ~ 'Low Disadv., Low Adv.',
+                           var == 'ses_classHigh Dis., High Adv.' ~ 'High Disadv., High Adv.',
+                           var == 'ses_classHigh Dis., Low Adv.' ~ 'High Disadv., Low Adv.',
+                           var == 'scale(age_over_65_prop)' ~ 'Over 65',
+                           var == 'scale(pop_non_hispanic_black_prop)' ~ 'Non-Hispanic Black',
+                           var == 'scale(hispanic_prop)' ~ 'Hispanic',
+                           var == 'idtime:com_classMedium' ~ 'Time:Medium comorbidity',
+                           var == 'idtime:com_classHigh' ~ 'Time:High comorbidity',
+                           var == 'idtime:ses_classLow Dis., Low Adv.' ~ 'Time:Low Disadv., Low Adv.',
+                           var == 'idtime:ses_classHigh Dis., High Adv.' ~ 'Time:High Disadv., High Adv.',
+                           var == 'idtime:ses_classHigh Dis., Low Adv.' ~ 'Time:High Disadv., Low Adv.',
+                           var == 'scale(male_prop)' ~ 'Male'),
+           expmean=sprintf("%.3f", round(exp(mean), 3)),
+           CrI = paste0("[", 
+                        sprintf("%.3f", round(exp(mean-1.96*sd), 3)), 
+                        ", ", 
+                        sprintf("%.3f", round(exp(mean+1.96*sd), 3)), 
+                        "]")) %>%
+    select(var, expmean, CrI) 
+}
+```
+
+```{r format_models}
+# extract fixed effects from models
+# format model output to prepare for table
+
+# Period 1 Weekly Cases
+p1_cases_weekly <- format_model(inla_cases_p1$summary.fixed) 
+
+# Period 2 Weekly Cases
+p2_cases_weekly <- format_model(inla_cases_p2$summary.fixed) 
+
+# Period 2 Weekly Deaths
+p2_deaths_weekly <- format_model(inla_deaths_p2$summary.fixed) 
+```
+
+
+## Export model output
+```{r exportmods}
+save(p1_cases_weekly, p2_cases_weekly, p2_deaths_weekly, file="results/final.models.Rdata")
+```
+
+
